@@ -3,6 +3,7 @@ import pandas as pd
 import zipfile
 import io
 import csv
+import re  # Thêm thư viện re để lọc ký tự lỗi
 
 st.set_page_config(page_title="TXT ➜ Excel Splitter", layout="wide")
 
@@ -16,6 +17,15 @@ rows_per_file = st.number_input(
     value=100000,
     step=1000
 )
+
+# Hàm loại bỏ ký tự không hợp lệ với Excel
+# Giữ lại các ký tự in được, dấu xuống dòng (\n, \r) và tab (\t)
+ILLEGAL_CHARACTERS_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\xff]')
+
+def clean_string(val):
+    if isinstance(val, str):
+        return ILLEGAL_CHARACTERS_RE.sub("", val)
+    return val
 
 if uploaded_file is not None:
 
@@ -52,7 +62,8 @@ if uploaded_file is not None:
 
                 total_rows += 1
 
-                row = line.strip().split(delimiter)
+                # Tách dòng và làm sạch từng phần tử ngay lập tức
+                row = [clean_string(item) for item in line.strip().split(delimiter)]
                 chunk.append(row)
 
                 if total_rows % 5000 == 0:
@@ -61,13 +72,14 @@ if uploaded_file is not None:
                 if len(chunk) >= rows_per_file:
 
                     max_cols = max(len(r) for r in chunk)
-
                     cols = [f"COL_{i+1}" for i in range(max_cols)]
 
-                    df = pd.DataFrame(chunk, columns=cols)
+                    # Đảm bảo các dòng có đủ số cột bằng cách padding chuỗi rỗng
+                    padded_chunk = [r + [""] * (max_cols - len(r)) for r in chunk]
+
+                    df = pd.DataFrame(padded_chunk, columns=cols)
 
                     buffer = io.BytesIO()
-
                     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
                         df.to_excel(writer, index=False, sheet_name="Data")
 
@@ -76,26 +88,22 @@ if uploaded_file is not None:
                     file_index += 1
                     chunk = []
 
-            # phần còn lại
+            # xử lý phần còn lại cuối cùng
             if chunk:
-
                 max_cols = max(len(r) for r in chunk)
-
                 cols = [f"COL_{i+1}" for i in range(max_cols)]
+                padded_chunk = [r + [""] * (max_cols - len(r)) for r in chunk]
 
-                df = pd.DataFrame(chunk, columns=cols)
+                df = pd.DataFrame(padded_chunk, columns=cols)
 
                 buffer = io.BytesIO()
-
                 with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
                     df.to_excel(writer, index=False, sheet_name="Data")
 
                 zipf.writestr(f"output_{file_index}.xlsx", buffer.getvalue())
 
         zip_buffer.seek(0)
-
         progress.progress(100)
-
         st.success(f"Xong! Đã xử lý {total_rows:,} dòng.")
 
         st.download_button(
